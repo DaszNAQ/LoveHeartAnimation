@@ -3,10 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Love Heart Animation: a collection of 3D (WebGL) and CSS heart animations - I Love You, Heartbeat, Floating, Orbit, Cupid, Particles and Crystal.">
+    <meta name="theme-color" content="#000000">
     <title>LOVE HEART ANIMATION</title>
     <script>try{document.documentElement.dataset.theme=localStorage.getItem("theme")||"dark"}catch(e){document.documentElement.dataset.theme="dark"}</script>
     <link rel="stylesheet" href="style.css">
-    <link rel="icon" type="image/png" href="./img/icon_loveheart.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="./img/favicon-32.png">
+    <link rel="apple-touch-icon" href="./img/apple-touch-icon.png">
 
 </head>
 <body>
@@ -17,11 +20,13 @@
         </button>
         <h1 class="title">LOVE HEART ANIMATION</h1>
         <nav class="nav" aria-label="Heart animations">
-            <button class="nav_btn active" data-scene="text">I Love You</button>
+            <button class="nav_btn active" data-scene="text" aria-current="true">I Love You</button>
             <button class="nav_btn" data-scene="beat">Heartbeat</button>
             <button class="nav_btn" data-scene="float">Floating</button>
             <button class="nav_btn" data-scene="orbit">Orbit</button>
             <button class="nav_btn" data-scene="cupid">Cupid</button>
+            <button class="nav_btn" data-scene="particles">Particles</button>
+            <button class="nav_btn" data-scene="crystal">Crystal</button>
         </nav>
     </header>
 
@@ -33,6 +38,14 @@
         <canvas id="gl" aria-label="Animated 3D hearts"></canvas>
         <p id="gl_hint" class="gl_hint">Drag to look around</p>
         <p id="gl_note" class="gl_note">Your browser or device doesn't support WebGL, which the 3D scenes need.</p>
+
+        <!-- Three.js scenes: Particles + Crystal (library loaded on demand, see script.js) -->
+        <canvas id="three" class="three" aria-label="Animated 3D hearts"></canvas>
+        <p id="three_status" class="three_status" role="status"></p>
+        <p id="crystal_text" class="crystal_text">This is for you</p>
+        <button id="crystal_music" class="crystal_music" type="button" aria-label="Play music" title="Play music">
+            <svg viewBox="0 0 512 512" aria-hidden="true"><path d="M470.38 1.51L150.41 96A32 32 0 0 0 128 126.51v261.41A139 139 0 0 0 96 384c-53 0-96 28.66-96 64s43 64 96 64 96-28.66 96-64V214.32l256-75v184.61a138.4 138.4 0 0 0-32-3.93c-53 0-96 28.65-96 64s43 64 96 64 96-28.65 96-64V32a32 32 0 0 0-41.62-30.49z"/></svg>
+        </button>
     </main>
 
     <footer class="site-footer">&copy; 2026 made by DaszNAQ with LOVE . All rights reserved.</footer>

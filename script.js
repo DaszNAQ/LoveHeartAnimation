@@ -16,7 +16,7 @@ for(let i = 1; i <= totalItems; i++){
     ui.appendChild(love);
 }
 
-/* Navbar + 3D scenes (our own tiny WebGL engine - no libraries) */
+/* Navbar + 3D scenes */
 const canvas  = document.getElementById("gl");
 const stageEl = document.querySelector(".stage");
 const uiEl    = document.getElementById("ui");
@@ -39,7 +39,6 @@ function initGL(){
             || canvas.getContext("experimental-webgl", { antialias: true, alpha: false });
     if(!gl) return null;
 
-    /* tiny math library (column-major 4x4 matrices) */
     const M = {
         id: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
         mul(a, b){
@@ -76,7 +75,7 @@ function initGL(){
             o[14] = fx * e[0] + fy * e[1] + fz * e[2];
             return o;
         },
-        // position, rotation (x,y,z) and scale -> model matrix
+
         trs(p, rx, ry, rz, sx, sy = sx, sz = sx){
             return M.mul(M.trans(p[0], p[1], p[2]), M.mul(M.rotY(ry), M.mul(M.rotX(rx), M.mul(M.rotZ(rz), M.scale(sx, sy, sz)))));
         },
@@ -89,7 +88,6 @@ function initGL(){
     const hex = c => [((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255];
     const norm3 = v => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
 
-    /* shaders */
     const PREC = "#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n";
 
     function makeProgram(vs, fs, names){
@@ -112,7 +110,6 @@ function initGL(){
         return { p, u };
     }
 
-    // glossy lit surfaces: ambient + key light + 2 point lights + specular + rim + fog
     const LIT = makeProgram(`
         attribute vec3 aPos; attribute vec3 aExtra;
         uniform mat4 uVP; uniform mat4 uModel;
@@ -647,15 +644,22 @@ function initGL(){
     });
     ["pointerup", "pointercancel"].forEach(ev => canvas.addEventListener(ev, () => { dragging = false; }));
 
-    /* render loop */
+    /* render loop
+       Only runs while a 3D scene is visible and the tab is in the foreground,
+       so the "I Love You" scene and background tabs cost no CPU/GPU/battery. */
     gl.enable(gl.DEPTH_TEST);
     gl.clearColor(0, 0, 0, 1);
-    let prev = performance.now() / 1000;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const SLOW_FACTOR = 0.25;            // animation speed when the user prefers reduced motion
+    let prev = 0, clock = 0, rafId = 0, running = false;
     function loop(){
-        requestAnimationFrame(loop);
+        if(!running) return;
+        rafId = requestAnimationFrame(loop);
         const now = performance.now() / 1000;
-        const dt = Math.min(now - prev, 0.05);
+        const real = Math.min(now - prev, 0.05);
         prev = now;
+        const dt = reduceMotion.matches ? real * SLOW_FACTOR : real;
+        clock += dt;                     // scene time (slowed down when reduced motion is on)
         const s = scenes[current];
         if(!s || !canvas.width) return;
         if(!dragging){                       // ease the camera back to its default view
@@ -678,36 +682,622 @@ function initGL(){
         curProg = null;
         gl.depthMask(true);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        s.render(now, dt);
+        s.render(clock, dt);
     }
-    loop();
+    function start(){
+        if(running) return;
+        running = true;
+        prev = performance.now() / 1000;     // avoid a big dt jump after a pause
+        rafId = requestAnimationFrame(loop);
+    }
+    function stop(){
+        running = false;
+        cancelAnimationFrame(rafId);
+    }
+    // start or stop the loop depending on what the user is currently looking at
+    function sync(){
+        if(scenes[current] && !document.hidden) start(); else stop();   // only our own 3D scenes
+    }
 
-    return { scenes, resize, setTheme };
+    return { scenes, resize, setTheme, sync };
 }
 
 const GL = initGL();
+
+
+const THREE_SCENES = ["particles", "crystal"];
+const isThreeScene = name => THREE_SCENES.indexOf(name) !== -1;
+
+const TJS = (() => {
+    const CDN = {
+        gsap:  "https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js",
+        three: "https://cdn.jsdelivr.net/npm/three@0.136.0/build/three.min.js",
+        orbit: "https://cdn.jsdelivr.net/npm/three@0.136.0/examples/js/controls/OrbitControls.js",
+        gltf:  "https://cdn.jsdelivr.net/npm/three@0.136.0/examples/js/loaders/GLTFLoader.js"
+    };
+    // Crystal heart assets 
+    const CRYSTAL_ASSETS = {
+        model:  "https://assets.codepen.io/74321/heart.glb",
+        sprite: "https://assets.codepen.io/74321/heart.png",
+        matcap: "https://assets.codepen.io/74321/3.png",
+        music:  "https://assets.codepen.io/74321/ukulele.mp3"
+    };
+    const HEART_PATH = "M300,107.77C284.68,55.67,239.76,0,162.31,0,64.83,0,0,82.08,0,171.71c0,.48,0,.95,0,1.43-.52,19.5,0,217.94,299.87,379.69v0l0,0,.05,0,0,0,0,0v0C600,391.08,600.48,192.64,600,173.14c0-.48,0-.95,0-1.43C600,82.08,535.17,0,437.69,0,360.24,0,315.32,55.67,300,107.77";
+    const BG_LIGHT = 0xfff5f9;                     // same as the page background in light theme
+
+    const threeCanvas = document.getElementById("three");
+    const statusEl    = document.getElementById("three_status");
+    const crystalText = document.getElementById("crystal_text");
+    const musicBtn    = document.getElementById("crystal_music");
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const motion = () => reduceMotion.matches ? 0.25 : 1;   // animation speed factor
+
+    let renderer = null, libs = null, active = null, entered = false;
+    let running = false, rafId = 0, token = 0, isLight = false;
+    const scenes = {};
+
+    /* load Three.js + GSAP on demand */
+    function loadScript(src){
+        return new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = src;
+            s.async = true;
+            s.onload = resolve;
+            s.onerror = () => reject(new Error("Failed to load " + src));
+            document.head.appendChild(s);
+        });
+    }
+    function loadLibs(){
+        if(!libs){
+            libs = Promise.all([
+                loadScript(CDN.gsap),
+                loadScript(CDN.three).then(() => Promise.all([loadScript(CDN.orbit), loadScript(CDN.gltf)]))
+            ]).catch(err => { libs = null; throw err; });          // allow a retry on the next click
+        }
+        return libs;
+    }
+
+    // Crystal's caption font (Google Fonts), requested only when that tab is first opened
+    function loadCaptionFont(){
+        if(document.getElementById("lilita_font")) return;
+        const l = document.createElement("link");
+        l.id = "lilita_font";
+        l.rel = "stylesheet";
+        l.href = "https://fonts.googleapis.com/css2?family=Lilita+One&display=swap";
+        document.head.appendChild(l);
+    }
+
+    /* shared helper: a quad drawn once per particle (instanced) */
+    function instancedQuad(count, attrs){
+        const quad = new THREE.PlaneGeometry(1, 1);
+        const g = new THREE.InstancedBufferGeometry();
+        Object.keys(quad.attributes).forEach(k => { g.attributes[k] = quad.attributes[k]; });
+        g.index = quad.index;
+        g.instanceCount = count;
+        Object.keys(attrs).forEach(name => {
+            g.setAttribute(name, new THREE.InstancedBufferAttribute(attrs[name][0], attrs[name][1], false));
+        });
+        return g;
+    }
+
+    /* Scene 1: Particles */
+    function makeParticles(){
+        const SVG_W = 600, SVG_H = 552;
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 5000);
+        camera.position.z = 500;
+        const controls = new THREE.OrbitControls(camera, threeCanvas);
+        controls.enabled = false;
+
+        // one GSAP timeline holds every particle's tween
+        const tl = gsap.timeline({ repeat: -1, yoyo: true });
+        tl.pause();
+
+        // walk along the heart outline (measured on an off-screen SVG path)
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("width", "0");
+        svg.setAttribute("height", "0");
+        svg.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", HEART_PATH);
+        svg.appendChild(path);
+        document.body.appendChild(svg);
+        const vertices = [];
+        try{
+            const length = path.getTotalLength();
+            for(let i = 0; i < length; i += 0.1){
+                const point = path.getPointAtLength(i);
+                const vector = new THREE.Vector3(point.x, -point.y, 0);
+                vector.x += (Math.random() - 0.5) * 30;
+                vector.y += (Math.random() - 0.5) * 30;
+                vector.z += (Math.random() - 0.5) * 70;
+                vertices.push(vector);
+                // each particle flies in from the middle of the heart
+                tl.from(vector, {
+                    x: SVG_W / 2,
+                    y: -SVG_H / 2,
+                    z: 0,
+                    ease: "power2.inOut",
+                    duration: "random(2, 5)"
+                }, i * 0.002);
+            }
+        }finally{
+            document.body.removeChild(svg);
+        }
+
+        const positions = new Float32Array(vertices.length * 3);
+        const posAttr = new THREE.BufferAttribute(positions, 3);
+        posAttr.setUsage(THREE.DynamicDrawUsage);
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", posAttr);
+        const material = new THREE.PointsMaterial({ color: 0xee5282, blending: THREE.AdditiveBlending, size: 3 });
+        const particles = new THREE.Points(geometry, material);
+        particles.frustumCulled = false;                 // positions change every frame
+        particles.position.x -= SVG_W / 2;               // centre the heart
+        particles.position.y += SVG_H / 2;
+        scene.add(particles);
+
+        const spin = gsap.fromTo(scene.rotation, { y: -0.2 }, {
+            y: 0.2, repeat: -1, yoyo: true, ease: "power2.inOut", duration: 3
+        });
+        spin.pause();
+
+        return {
+            scene, camera,
+            label: "Animated particle heart",
+            enter(){ controls.enabled = true; tl.play(); spin.play(); },
+            leave(){ controls.enabled = false; tl.pause(); spin.pause(); },
+            setMotion(k){ tl.timeScale(k); spin.timeScale(k); },
+            update(){
+                for(let i = 0, j = 0; i < vertices.length; i++, j += 3){
+                    const v = vertices[i];
+                    positions[j] = v.x; positions[j + 1] = v.y; positions[j + 2] = v.z;
+                }
+                posAttr.needsUpdate = true;
+            },
+            applyTheme(light){
+                scene.background = new THREE.Color(light ? BG_LIGHT : 0x000000);
+                material.color.setHex(light ? 0xd3367d : 0xee5282);
+                // additive blending disappears on a light background
+                material.blending = light ? THREE.NormalBlending : THREE.AdditiveBlending;
+                material.needsUpdate = true;
+            }
+        };
+    }
+
+    /* Scene 2: Crystal */
+    const VERT_DOTS = `
+      #define M_PI 3.1415926535897932384626433832795
+    uniform float uTime;
+    uniform float uSize;
+    attribute float aScale;
+    attribute vec3 aColor;
+    attribute float random;
+    attribute float random1;
+    attribute float aSpeed;
+    varying vec3 vColor;
+    varying vec2 vUv;
+
+    void main() {
+      float sign = 2.0* (step(random, 0.5) -.5);
+      float t = sign*mod(-uTime *  aSpeed* 0.005  + 10.0*aSpeed*aSpeed, M_PI);
+      float a = pow(t, 2.0) * pow((t - sign * M_PI), 2.0);
+      float radius = 0.14;
+      vec3 myOffset =
+          vec3(t,  1.0, 0.0);
+      myOffset = vec3(radius *16.0 * pow(sin(t), 2.0) * sin(t), radius * (13.0 * cos(t) - 5.0 * cos(2.0 * t) - 2.0 * cos(3.0 * t) - cos(4.0 * t)), .15*(a*(random1 - .5))*sin(abs(10.0*(sin(.2*uTime + .2*random)))*t));
+      vec3 displacedPosition = myOffset;
+      vec4 modelPosition = modelMatrix * vec4(displacedPosition.xyz, 1.0);
+
+      vec4 viewPosition = viewMatrix * modelPosition;
+      viewPosition.xyz += position * aScale * uSize * pow(a, .5) * .5;
+      gl_Position = projectionMatrix * viewPosition;
+
+      vColor = aColor;
+      vUv = uv;
+    }
+  `;
+    const VERT_SNOW = `
+      #define M_PI 3.1415926535897932384626433832795
+
+
+    uniform float uTime;
+    uniform float uSize;
+    attribute float aScale;
+    attribute vec3 aColor;
+    attribute float phi;
+    attribute float random;
+    attribute float random1;
+    varying vec3 vColor;
+    varying vec2 vUv;
+
+    void main() {
+      float t = 0.01 * uTime + 12.0;
+      float angle = phi;
+
+      t = mod((-uTime + 100.0) * 0.06* random1 + random *2.0 * M_PI , 2.0 * M_PI);
+      vec3 myOffset = vec3(5.85*cos(angle * (t )), 2.0*(t - M_PI), 3.0*sin(angle * (t )/t));
+    vec4 modelPosition = modelMatrix * vec4(myOffset, 1.0);
+      vec4 viewPosition = viewMatrix * modelPosition;
+      viewPosition.xyz += position * aScale * uSize;
+      gl_Position = projectionMatrix * viewPosition;
+
+      vColor = aColor;
+      vUv = uv;
+    }
+  `;
+
+    // Glowing dots that trace a heart. On a light page they become normal-blended deep-pink dots.
+    const FRAG_DOTS = `
+    uniform float uLight;
+    varying vec3 vColor;
+    varying vec2 vUv;
+
+    void main() {
+      vec2 uv = vUv;
+      vec3 color = vColor;
+      float strength = distance(uv, vec2(0.5));
+      strength *= 2.0;
+      strength = 1.0 - strength;
+      if (uLight > 0.5) {
+        vec3 deep = mix(color, vec3(0.83, 0.21, 0.49), 0.55) * 0.85;
+        gl_FragColor = vec4(deep, clamp(strength, 0.0, 1.0));
+      } else {
+        gl_FragColor = vec4(strength * color, 1.0);
+      }
+    }
+  `;
+
+    // Little hearts drifting around (textured sprites). Same light-theme treatment.
+    const FRAG_SNOW = `
+    uniform sampler2D uTex;
+    uniform float uLight;
+    varying vec3 vColor;
+    varying vec2 vUv;
+
+    void main() {
+      vec2 uv = vUv;
+      vec3 color = vColor;
+      float strength = distance(uv, vec2(0.5, .65));
+      strength *= 2.0;
+      strength = 1.0 - strength;
+      vec3 tex = texture2D(uTex, uv).rgb;
+      vec3 lit = tex * color * (strength + .3);
+      if (uLight > 0.5) {
+        float a = clamp(max(lit.r, max(lit.g, lit.b)) * 1.6, 0.0, 1.0);
+        vec3 deep = mix(color, vec3(0.83, 0.21, 0.49), 0.55) * 0.85;
+        gl_FragColor = vec4(deep, a);
+      } else {
+        gl_FragColor = vec4(lit, 1.);
+      }
+    }
+  `;
+
+    function makeCrystal(){
+        loadCaptionFont();
+        const P = { count: 1500, max: 12.5 * Math.PI, a: 2, c: 4.5 };
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 100);
+        camera.position.set(0, 0, 4.5);
+        scene.add(camera);
+
+        const clock = new THREE.Clock();
+        const textureLoader = new THREE.TextureLoader();
+        const sprite = textureLoader.load(CRYSTAL_ASSETS.sprite);
+        const time = { current: 0, elapsed: 0, delta: 0, t0: 0, t1: 0, t: 0, frequency: 0.0005 };
+        const angle = { x: 0, z: 0 };
+        let data = 0, playing = false, k = 1;
+        let sound = null, analyser = null, listener = null, model = null;
+
+        /* glowing dots tracing a heart */
+        const heartMaterial = new THREE.ShaderMaterial({
+            vertexShader: VERT_DOTS,
+            fragmentShader: FRAG_DOTS,
+            uniforms: { uTime: { value: 0 }, uSize: { value: 0.2 }, uLight: { value: 0 } },
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            transparent: true
+        });
+        {
+            const count = P.count;
+            const scales = new Float32Array(count), colors = new Float32Array(count * 3);
+            const speeds = new Float32Array(count), randoms = new Float32Array(count), randoms1 = new Float32Array(count);
+            const choices = ["white", "red", "pink", "crimson", "hotpink", "green"];
+            for(let i = 0; i < count; i++){
+                randoms[i] = Math.random();
+                randoms1[i] = Math.random();
+                scales[i] = Math.random() * 0.35;
+                const c = new THREE.Color(choices[Math.floor(Math.random() * choices.length)]);
+                colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+                speeds[i] = Math.random() * P.max;
+            }
+            const g = instancedQuad(count, {
+                random: [randoms, 1], random1: [randoms1, 1], aScale: [scales, 1], aSpeed: [speeds, 1], aColor: [colors, 3]
+            });
+            const mesh = new THREE.Mesh(g, heartMaterial);
+            mesh.frustumCulled = false;
+            scene.add(mesh);
+        }
+
+        /* small hearts drifting around */
+        const snowMaterial = new THREE.ShaderMaterial({
+            vertexShader: VERT_SNOW,
+            fragmentShader: FRAG_SNOW,
+            uniforms: { uTime: { value: 0 }, uSize: { value: 0.3 }, uTex: { value: sprite }, uLight: { value: 0 } },
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            transparent: true
+        });
+        {
+            const count = 550;
+            const scales = new Float32Array(count), colors = new Float32Array(count * 3);
+            const phis = new Float32Array(count), randoms = new Float32Array(count), randoms1 = new Float32Array(count);
+            const choices = ["red", "pink", "hotpink", "green"];
+            for(let i = 0; i < count; i++){
+                phis[i] = (Math.random() - 0.5) * 10;
+                randoms[i] = Math.random();
+                randoms1[i] = Math.random();
+                scales[i] = Math.random() * 0.35;
+                const c = new THREE.Color(choices[Math.floor(Math.random() * choices.length)]);
+                colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+            }
+            const g = instancedQuad(count, {
+                phi: [phis, 1], random: [randoms, 1], random1: [randoms1, 1], aScale: [scales, 1], aColor: [colors, 3]
+            });
+            const mesh = new THREE.Mesh(g, snowMaterial);
+            mesh.frustumCulled = false;
+            scene.add(mesh);
+        }
+
+        /* the heart model (glTF + matcap) */
+        new THREE.GLTFLoader().load(CRYSTAL_ASSETS.model, gltf => {
+            model = gltf.scene.children[0];
+            if(!model) return;
+            model.scale.set(0.01, 0.01, 0.01);
+            const grow = () => gsap.to(model.scale, { x: 0.35, y: 0.35, z: 0.35, duration: 1.5, ease: "elastic.out(1, 0.3)" });
+            model.material = new THREE.MeshMatcapMaterial({
+                matcap: textureLoader.load(CRYSTAL_ASSETS.matcap, grow, undefined, grow),
+                color: "#ff89aC"
+            });
+            scene.add(model);
+        }, undefined, err => console.warn("Crystal heart: model failed to load", err));
+
+        /* camera follows the mouse a little */
+        threeCanvas.addEventListener("pointermove", e => {
+            if(active !== "crystal" || e.pointerType !== "mouse") return;
+            const r = threeCanvas.getBoundingClientRect();
+            gsap.to(camera.position, {
+                x: gsap.utils.mapRange(0, r.width, 0.2, -0.2, e.clientX - r.left),
+                y: gsap.utils.mapRange(0, r.height, 0.2, -0.2, -(e.clientY - r.top))
+            });
+        });
+
+        /* music: loaded on the first click, drives speed + camera while it plays */
+        function resetMusicUI(){
+            gsap.killTweensOf(musicBtn);
+            musicBtn.disabled = false;
+            musicBtn.style.opacity = "";
+        }
+        function loadMusic(){
+            return new Promise((resolve, reject) => {
+                listener = new THREE.AudioListener();
+                camera.add(listener);
+                sound = new THREE.Audio(listener);
+                new THREE.AudioLoader().load(CRYSTAL_ASSETS.music, buffer => {
+                    sound.setBuffer(buffer);
+                    sound.setLoop(false);
+                    sound.setVolume(0.5);
+                    sound.play();
+                    analyser = new THREE.AudioAnalyser(sound, 32);
+                    resolve();
+                }, progress => {
+                    if(progress && progress.total){
+                        gsap.to(musicBtn, { opacity: 1 - progress.loaded / progress.total, duration: 1, ease: "power1.out" });
+                    }
+                }, reject);
+            });
+        }
+        function beginPlayback(){
+            time.t0 = time.elapsed;
+            data = 0;
+            playing = true;
+            gsap.to(musicBtn, { opacity: 0, duration: 1, ease: "power1.out" });
+        }
+        function stopMusic(){
+            if(sound && sound.isPlaying) sound.stop();
+            playing = false;
+            data = 0;
+            angle.x = 0; angle.z = 0;
+            resetMusicUI();
+        }
+        musicBtn.addEventListener("click", () => {
+            musicBtn.disabled = true;
+            if(analyser){
+                sound.play();
+                beginPlayback();
+            }else{
+                loadMusic().then(beginPlayback).catch(err => {
+                    console.warn("Crystal heart: music failed to load", err);
+                    resetMusicUI();
+                });
+            }
+        });
+
+        return {
+            scene, camera,
+            label: "Animated crystal heart",
+            enter(){
+                time.current = clock.getElapsedTime();      // no big time jump after being away
+                camera.position.set(0, 0, 4.5);
+            },
+            leave(){ stopMusic(); },
+            setMotion(f){ k = f; },
+            update(){
+                time.elapsed = clock.getElapsedTime();
+                time.delta = Math.max(-60, Math.min(60, (time.current - time.elapsed) * 1000)) * k;
+
+                if(analyser && playing){
+                    time.t = time.elapsed - time.t0 + time.t1;
+                    data = analyser.getAverageFrequency();
+                    data *= data / 2000;
+                    angle.x += time.delta * 0.001 * 0.63;
+                    angle.z += time.delta * 0.001 * 0.39;
+                    if(!sound.isPlaying){                    // the song just ended: glide the camera home
+                        time.t1 = time.t;
+                        musicBtn.disabled = false;
+                        playing = false;
+                        angle.x = 0; angle.z = 0;
+                        const tl = gsap.timeline();
+                        tl.to(camera.position, { x: 0, z: 4.5, duration: 4, ease: "expo.in" });
+                        tl.to(musicBtn, { opacity: 1, duration: 1, ease: "power1.out" });
+                    }else{
+                        camera.position.x = Math.sin(angle.x) * P.a;
+                        camera.position.z = Math.min(Math.max(Math.cos(angle.z) * P.c, 1.75), 6.5);
+                    }
+                }
+                camera.lookAt(scene.position);
+
+                heartMaterial.uniforms.uTime.value += time.delta * time.frequency * (1 + data * 0.2);
+                snowMaterial.uniforms.uTime.value += time.delta * 0.0004 * (1 + data);
+                if(model) model.rotation.y -= 0.0005 * time.delta * (1 + data);
+                time.current = time.elapsed;
+            },
+            applyTheme(light){
+                scene.background = new THREE.Color(light ? BG_LIGHT : 0x16000a);
+                [heartMaterial, snowMaterial].forEach(m => {
+                    m.blending = light ? THREE.NormalBlending : THREE.AdditiveBlending;
+                    m.uniforms.uLight.value = light ? 1 : 0;
+                });
+            }
+        };
+    }
+
+    const FACTORIES = { particles: makeParticles, crystal: makeCrystal };
+
+    /* renderer + loop */
+    function createRenderer(){
+        renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true });
+        new ResizeObserver(() => { if(entered) resize(); }).observe(stageEl);
+        if(reduceMotion.addEventListener){
+            reduceMotion.addEventListener("change", () => { const s = scenes[active]; if(s) s.setMotion(motion()); });
+        }
+    }
+    function resize(){
+        if(!renderer) return;
+        const w = stageEl.clientWidth, h = stageEl.clientHeight;
+        if(!w || !h) return;
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(w, h, false);                       // CSS sizes the canvas
+        Object.keys(scenes).forEach(n => {
+            scenes[n].camera.aspect = w / h;
+            scenes[n].camera.updateProjectionMatrix();
+        });
+    }
+    function frame(){
+        if(!running) return;
+        rafId = requestAnimationFrame(frame);
+        const s = scenes[active];
+        if(!s) return;
+        s.update();
+        renderer.render(s.scene, s.camera);
+    }
+    function start(){ if(!running){ running = true; rafId = requestAnimationFrame(frame); } }
+    function stop(){ running = false; cancelAnimationFrame(rafId); }
+    // run only while a Three.js scene is on screen and the browser tab is visible
+    function sync(){ if(entered && !document.hidden) start(); else stop(); }
+
+    function enter(name){
+        const s = scenes[name];
+        active = name;
+        entered = true;
+        threeCanvas.classList.add("active");
+        threeCanvas.classList.toggle("drag", name === "particles");
+        threeCanvas.setAttribute("aria-label", s.label);
+        crystalText.classList.toggle("active", name === "crystal");
+        musicBtn.classList.toggle("active", name === "crystal");
+        s.applyTheme(isLight);                               // the theme may have changed while we were away
+        s.setMotion(motion());
+        s.enter();
+        resize();
+        sync();
+    }
+
+    function close(){
+        token++;                                             // cancels a pending open()
+        stop();
+        entered = false;
+        if(active && scenes[active]) scenes[active].leave();
+        active = null;
+        threeCanvas.classList.remove("active");
+        crystalText.classList.remove("active");
+        musicBtn.classList.remove("active");
+        statusEl.classList.remove("active");
+    }
+
+    async function open(name){
+        close();
+        const my = ++token;
+        statusEl.textContent = "Loading\u2026";
+        statusEl.classList.add("active");
+        try{
+            await loadLibs();
+            if(my !== token) return;                         // the user already moved on
+            if(!renderer) createRenderer();
+            if(!scenes[name]) scenes[name] = FACTORIES[name]();
+            scenes[name].applyTheme(isLight);
+        }catch(err){
+            console.error(err);
+            if(my === token) statusEl.textContent = "Couldn't start this scene. It needs an internet connection to load Three.js.";
+            return;
+        }
+        if(my !== token) return;
+        statusEl.classList.remove("active");
+        enter(name);
+    }
+
+    function setTheme(light){
+        isLight = light;
+        Object.keys(scenes).forEach(n => scenes[n].applyTheme(light));
+    }
+
+    return { open, close, resize, setTheme, sync };
+})();
 
 // Navbar switching
 const buttons = document.querySelectorAll(".nav_btn");
 buttons.forEach(btn => {
     btn.addEventListener("click", () => {
         current = btn.dataset.scene;
-        buttons.forEach(b => b.classList.toggle("active", b === btn));
-        const isText = current === "text";
+        buttons.forEach(b => {
+            const on = b === btn;
+            b.classList.toggle("active", on);
+            if(on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current");
+        });
+        const isText  = current === "text";
+        const isThree = isThreeScene(current);        // Particles / Crystal (Three.js)
+        const isGL    = !isText && !isThree;          // one of our own WebGL scenes
         uiEl.classList.toggle("active", isText);
-        canvas.classList.toggle("active", !isText && !!GL);
+        canvas.classList.toggle("active", isGL && !!GL);
         noteEl.classList.toggle("active", !isText && !GL);
-        hintEl.classList.toggle("active", !isText && !!GL && !GL.scenes[current].noDrag);
-        if(GL && !isText) GL.resize();
+        hintEl.classList.toggle("active", !!GL && ((isGL && !GL.scenes[current].noDrag) || current === "particles"));
+        if(GL && isGL) GL.resize();
+        if(GL) GL.sync();                       // our own 3D loop runs only on our own 3D scenes
+        if(isThree && GL) TJS.open(current); else TJS.close();
     });
 });
 
+// Pause rendering while the tab is in the background
+document.addEventListener("visibilitychange", () => { if(GL) GL.sync(); TJS.sync(); });
+
 // Dark / light theme
 const themeBtn = document.getElementById("theme_btn");
+const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 function applyTheme(theme){
     const light = theme === "light";
     document.documentElement.dataset.theme = theme;
+    if(themeColorMeta) themeColorMeta.setAttribute("content", light ? "#fff5f9" : "#000000");
     if(GL) GL.setTheme(light);
+    TJS.setTheme(light);
     themeBtn.setAttribute("aria-pressed", String(light));
     themeBtn.setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
     try{ localStorage.setItem("theme", theme); }catch(e){}

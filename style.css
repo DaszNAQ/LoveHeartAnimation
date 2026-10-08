@@ -229,8 +229,76 @@ body{
 .gl_note{ top: 45%; padding: 0 20px; color: #f3a6c6; }
 .gl_hint.active, .gl_note.active{ display: block; }
 
+/* Three.js scenes (Particles, Crystal) */
+#three{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+}
+#three.active{ display: block; }
+#three.drag{ cursor: grab; }
+#three.drag:active{ cursor: grabbing; }
+
+.three_status{
+    display: none;
+    position: absolute;
+    top: 45%;
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: 0 20px;
+    text-align: center;
+    color: #f3a6c6;
+    pointer-events: none;
+}
+.three_status.active{ display: block; }
+
+.crystal_text{
+    display: none;
+    position: absolute;
+    top: 6%;
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: 0 16px;
+    text-align: center;
+    pointer-events: none;
+    font-family: "Lilita One", system-ui, sans-serif;     /* Google font, loaded on first use (see script.js) */
+    font-weight: 400;
+    font-size: clamp(1.1rem, 3.4vh, 1.9rem);
+    letter-spacing: .02em;
+    color: #ffdada;
+}
+.crystal_text.active{ display: block; }
+
+.crystal_music{
+    display: none;
+    position: absolute;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    width: 44px; height: 44px; padding: 0;
+    place-items: center;
+    border: 1px solid #5a1a3a; border-radius: 50%;
+    background: rgba(0, 0, 0, .35); color: #f3a6c6; cursor: pointer;
+    transition: border-color .2s, color .2s, box-shadow .2s;
+}
+.crystal_music.active{ display: grid; }
+.crystal_music:hover:not(:disabled){ border-color: #d3367d; color: #fff; box-shadow: 0 0 12px rgba(211,54,125,.5); }
+.crystal_music:focus-visible{ outline: 2px solid #ff9a5c; outline-offset: 2px; }
+.crystal_music:disabled{ cursor: default; }
+.crystal_music svg{ width: 18px; height: 18px; fill: currentColor; }
+
 @media (prefers-reduced-motion: reduce){
     .title{ animation: none; }
+    /* Freeze the "I love you" heart instead of removing the animation: the
+       negative animation-delay keeps every word at its staggered position,
+       so the heart shape stays visible as a still image. */
+    #ui .love_horizontal,
+    #ui .love_vertical{ animation-play-state: paused; }
+    body, .nav_btn, .theme_btn{ transition: none; }
 }
 
 /* Responsive */
@@ -285,6 +353,10 @@ html[data-theme="light"] .site-footer{ color: #a05577; border-top-color: #f6d3e2
 html[data-theme="light"] #ui .love_word{ text-shadow: 0 1px 6px rgba(211,54,125,.3); }
 html[data-theme="light"] .gl_hint{ color: #8a3a5f; text-shadow: none; }
 html[data-theme="light"] .gl_note{ color: #b02a62; }
+html[data-theme="light"] .three_status{ color: #b02a62; }
+html[data-theme="light"] .crystal_text{ color: #b02a62; }
+html[data-theme="light"] .crystal_music{ background: rgba(255,255,255,.6); border-color: #f0b3cc; color: #b02a62; }
+html[data-theme="light"] .crystal_music:hover:not(:disabled){ border-color: #d3367d; color: #8a1a4a; }
 
 @media (max-width: 520px){
     .site-header{ padding-top: 58px; }
